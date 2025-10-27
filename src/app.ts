@@ -1,58 +1,52 @@
 import express, { Application, Request, Response } from "express";
 import cors from "cors";
 import helmet from "helmet";
+import { auth } from "express-openid-connect";
+import { authConfig } from "./config/auth.config";
+import routes from "./routes";
+import { errorHandler, notFound } from "./middleware/error.middleware";
 
 export const createApp = (): Application => {
   const app = express();
 
-  // middleware
+  // Basic middleware
   app.use(helmet());
   app.use(cors());
   app.use(express.json());
   app.use(express.urlencoded({ extended: true }));
 
-  // health check
-  app.get("/health", (req: Request, res: Response) => {
-    res.status(200).json({
-      status: "healthy",
-      timestamp: new Date().toISOString(),
-      uptime: process.uptime(),
-    });
+  // Initialize Auth0
+  app.use(auth(authConfig));
+
+  // Middleware
+  app.use((req: any, res: any, next: any) => {
+    res.locals.user = req.oidc?.user;
+    next();
   });
 
-  // database check
-  app.get("/health/db", async (req: Request, res: Response) => {
-    try {
-      const { getPool } = await import("./config/database.config");
-      const pool = getPool();
-      const result = await pool.query("SELECT 1 AS health");
-
-      res.status(200).json({
-        status: "healthy",
-        database: "connected",
-        timestamp: new Date().toISOString(),
-      });
-    } catch (error) {
-      res.status(500).json({
-        status: "unhealthy",
-        database: "disconnected",
-        error: error instanceof Error ? error.message : "Unknown error",
-        timestamp: new Date().toISOString(),
-      });
-    }
-  });
-
-  // root
-  app.get("/", (req: Request, res: Response) => {
+  // Root endpoint
+  app.get("/", (req: any, res: Response) => {
     res.json({
       message: "Chatbot Service API",
       version: "1.0.0",
+      user: req.oidc?.user || null,
+      isAuthenticated: req.oidc?.isAuthenticated() || false,
       endpoints: {
-        health: "/health",
-        databaseHealth: "/health/db",
+        health: "/api/health",
+        auth: "/api/auth",
+        chatbots: "/api/chatbots",
+        login: "/login",
+        logout: "/logout",
       },
     });
   });
+
+  // API routes
+  app.use("/api", routes);
+
+  // Error handling
+  app.use(notFound);
+  app.use(errorHandler);
 
   return app;
 };
